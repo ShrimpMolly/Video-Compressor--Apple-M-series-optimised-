@@ -190,53 +190,85 @@ class VideoCompressorApp(tk.Tk):
             self.open_btn.config(state="normal")
 
     def recommend_settings(self, fp: Path):
-        dur = float(subprocess.check_output([
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(fp)
-        ]))
-        wh = subprocess.check_output([
-            "ffprobe", "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0",
-            str(fp)
-        ])
-        w, h = map(int, wh.decode().split(','))
-        ts = 350 * 1024 * 1024
-        # detect audio channels
-        ch = int(subprocess.check_output([
-            "ffprobe", "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=channels",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            str(fp)
-        ]).decode().strip())
-        # recommend audio bitrate based on channels and mono setting
-        if self.mono_var.get():
-            rec_ab = 96
-        else:
-            rec_ab = 96 if ch == 1 else 128
-        self.audio_bitrate_var.set(f"{rec_ab}k")
-        ab = int(self.audio_bitrate_var.get().rstrip('k')) * 1000
-        tb = ts * 8 / dur
-        vk = int(max(tb - ab, 100000) / 1000)
+        try:
+            dur = float(subprocess.check_output([
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(fp)
+            ]))
+            wh = subprocess.check_output([
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0",
+                str(fp)
+            ])
+            # w, h = map(int, wh.decode().split(',')) # Original line
+            # Strip leading/trailing whitespace from the whole output
+            wh_str = wh.decode().strip()
+            parts = wh_str.split(',')
+            # if len(parts) == 2: # Previous check
+            if len(parts) >= 2:  # Ensure we have at least two parts
+                w_str_cleaned = parts[0].strip()
+                h_str_cleaned = parts[1].strip()
+                # Ensure parts are not empty after stripping, before calling int()
+                if not w_str_cleaned or not h_str_cleaned:
+                    raise ValueError(
+                        f"ffprobe returned empty string for width or height. Raw output: '{wh.decode()}'")
+                w = int(w_str_cleaned)
+                h = int(h_str_cleaned)
+            else:
+                # This will be caught by the generic Exception handler below and show a message box
+                raise ValueError(
+                    f"ffprobe output for width/height not in expected format (expected at least 2 comma-separated values). Raw output: '{wh.decode()}'")
+            ts = 350 * 1024 * 1024
+            # detect audio channels
+            ch_output = subprocess.check_output([
+                "ffprobe", "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=channels",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(fp)
+            ])
+            ch_str = ch_output.decode().strip()
+            if not ch_str:  # Handle cases where audio stream might be missing or channels not reported
+                messagebox.showwarning(
+                    "Audio Info", f"Could not determine audio channels for {fp.name}. Assuming mono for recommendations.")
+                ch = 1
+            else:
+                ch = int(ch_str)
 
-        self.resolution_var.set(f"{w}x{h}")
-        self.codec_var.set("hevc_videotoolbox" if self.hw else "libx265")
-        self.preset_var.set("slow")
-        self.video_bitrate_var.set(vk)
+            # recommend audio bitrate based on channels and mono setting
+            if self.mono_var.get():
+                rec_ab = 96
+            else:
+                rec_ab = 96 if ch == 1 else 128
+            self.audio_bitrate_var.set(f"{rec_ab}k")
+            ab = int(self.audio_bitrate_var.get().rstrip('k')) * 1000
+            tb = ts * 8 / dur
+            vk = int(max(tb - ab, 100000) / 1000)  # Ensure vk is at least 100k
 
-        messagebox.showinfo(
-            "Recommended Settings",
-            f"Output size ~350MB\n"
-            f"Resolution: {w}x{h}\n"
-            f"Codec: {self.codec_var.get()}\n"
-            f"Preset: {self.preset_var.get()}\n"
-            f"Audio: {self.audio_bitrate_var.get()}\n"
-            f"Video: {vk}kbit/s"
-        )
+            self.resolution_var.set(f"{w}x{h}")
+            self.codec_var.set("hevc_videotoolbox" if self.hw else "libx265")
+            self.preset_var.set("slow")
+            self.video_bitrate_var.set(vk)
+
+            messagebox.showinfo(
+                "Recommended Settings",
+                f"Output size ~350MB\\n"
+                f"Resolution: {w}x{h}\\n"
+                f"Codec: {self.codec_var.get()}\\n"
+                f"Preset: {self.preset_var.get()}\\n"
+                f"Audio: {self.audio_bitrate_var.get()}\\n"
+                f"Video: {vk}kbit/s"
+            )
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror(
+                "Error Reading Video Info", f"Failed to get video details for {fp.name} using ffprobe. Error: {e}")
+        except Exception as e:
+            messagebox.showerror(
+                "Recommendation Error", f"An unexpected error occurred while generating recommendations for {fp.name}: {e}")
 
     def start_compression_thread(self):
         threading.Thread(target=self.compress_all, daemon=True).start()
