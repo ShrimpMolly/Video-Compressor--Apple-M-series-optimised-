@@ -163,20 +163,14 @@ class VideoCompressorApp(tk.Tk):
         self.thumb_label.pack(fill="both", padx=10, pady=5)
 
     def select_input(self):
-        if self.input_type_var.get() == "files":
-            fs = filedialog.askopenfilenames(
-                title="Select video files",
-                filetypes=[
-                    ("Video files", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv"), ("All", "*.*")]
-            )
-            self.inputs = [Path(x) for x in fs]
-        else:
-            d = filedialog.askdirectory(title="Select folder")
-            self.inputs = []
-            if d:
-                for ext in ("*.mp4", "*.mkv", "*.avi", "*.mov", "*.flv", "*.wmv"):
-                    self.inputs.extend(Path(d).glob(ext))
-
+        fs = filedialog.askopenfilenames(
+            title="Select video files",
+            filetypes=[
+                ("Video files", "*.mp4 *.mkv *.avi *.mov *.flv *.wmv"),
+                ("All", "*.*")
+            ]
+        )
+        self.inputs = [Path(x) for x in fs]
         self.lbl_in.config(text=f"{len(self.inputs)} file(s) selected")
         self.refresh_listbox()
         if len(self.inputs) == 1:
@@ -290,6 +284,8 @@ class VideoCompressorApp(tk.Tk):
         ))
 
         for idx, inp in enumerate(self.inputs, start=1):
+            # apply per-file recommended settings before compression
+            self.recommend_settings(inp)
             start_time = time.time()
             # get duration
             dur = float(subprocess.check_output([
@@ -301,7 +297,12 @@ class VideoCompressorApp(tk.Tk):
             # init file
             self.after(0, lambda d=dur, name=inp.name: (
                 self.file_progress.configure(maximum=d, value=0),
-                self.file_label.config(text=f"File: {name} (0%)")
+                self.file_label.config(text=(
+                    f"File: {name} (0%) - Res: {self.resolution_var.get()} "
+                    f"Codec: {self.codec_var.get()} "
+                    f"{'Bitrate: '+str(self.video_bitrate_var.get())+'kbit/s' if self.video_bitrate_var.get()>0 else 'CRF: '+str(self.crf_var.get())} "
+                    f"Audio: {self.audio_bitrate_var.get()}"
+                ))
             ))
 
             stem = inp.stem + "_mobile"
@@ -318,7 +319,8 @@ class VideoCompressorApp(tk.Tk):
             ] + (["-to", self.trim_end_var.get()] if self.trim_end_var.get() else []) + [
                 "-c:v", self.codec_var.get(),
                 "-preset", self.preset_var.get(),
-                "-vf", f"scale={self.resolution_var.get()}"
+                "-vf", f"scale={self.resolution_var.get()}",
+                "-pix_fmt", "yuv420p",
             ]
             # if mono is requested, force single channel audio
             if self.mono_var.get():
@@ -344,11 +346,21 @@ class VideoCompressorApp(tk.Tk):
                     secs = h*3600 + mn*60 + s
                     pct_file = secs / dur * 100
                     elapsed = time.time() - start_time
-                    eta = (elapsed / secs * (dur - secs)) if secs > 0 else 0
+                    # compute estimated time remaining, avoid extreme values early on
+                    if secs > 1:
+                        eta = (elapsed / secs) * (dur - secs)
+                    else:
+                        eta = dur - secs
+                    # clamp to non-negative
+                    eta = max(eta, 0)
                     self.after(0, lambda pct=pct_file, secs=secs, name=inp.name, e=eta: (
                         self.file_progress.configure(value=secs),
-                        self.file_label.config(
-                            text=f"File: {name} ({pct:.1f}%)"),
+                        self.file_label.config(text=(
+                            f"File: {name} ({pct:.1f}%) - Res: {self.resolution_var.get()} "
+                            f"Codec: {self.codec_var.get()} "
+                            f"{'Bitrate: '+str(self.video_bitrate_var.get())+'kbit/s' if self.video_bitrate_var.get()>0 else 'CRF: '+str(self.crf_var.get())} "
+                            f"Audio: {self.audio_bitrate_var.get()}"
+                        )),
                         self.eta_label.config(text=f"ETA: {e:.1f}s")
                     ))
                     # thumbnail extraction at low rate
