@@ -33,6 +33,8 @@ class VideoCompressorApp(tk.Tk):
         self.input_type_var = tk.StringVar(value="files")
 
         self.inputs = []
+        # store individual file settings
+        self.file_settings = {}
 
         # Pause/Resume and Cancel flags
         self.pause_event = threading.Event()
@@ -64,6 +66,9 @@ class VideoCompressorApp(tk.Tk):
                         value="folder").pack(side="left", padx=5)
         ttk.Button(self, text="Select Input", command=self.select_input).pack(
             fill="x", padx=10, pady=5)
+        # Add clear list button
+        ttk.Button(self, text="Clear List", command=self.clear_list).pack(
+            fill="x", padx=10, pady=(0,5))
         self.lbl_in = ttk.Label(self, text="No input selected")
         self.lbl_in.pack(fill="x", padx=10)
         ttk.Button(self, text="Select Output Directory",
@@ -74,6 +79,8 @@ class VideoCompressorApp(tk.Tk):
         # file order list & reorder
         self.listbox = tk.Listbox(self, height=5)
         self.listbox.pack(fill="x", padx=10, pady=(5, 0))
+        # load settings when a file is selected
+        self.listbox.bind('<<ListboxSelect>>', self.on_file_select)
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill="x", padx=10)
         ttk.Button(btn_frame, text="Move Up",
@@ -170,11 +177,24 @@ class VideoCompressorApp(tk.Tk):
                 ("All", "*.*")
             ]
         )
-        self.inputs = [Path(x) for x in fs]
+        # Append new selections instead of clearing existing
+        new_inputs = [Path(x) for x in fs]
+        self.inputs.extend(new_inputs)
+        # initialize settings for each newly added file
+        for p in new_inputs:
+            self.file_settings[p] = {
+                'resolution': self.resolution_var.get(),
+                'codec': self.codec_var.get(),
+                'crf': self.crf_var.get(),
+                'preset': self.preset_var.get(),
+                'audio_bitrate': self.audio_bitrate_var.get(),
+                'video_bitrate': self.video_bitrate_var.get(),
+                'mono': self.mono_var.get(),
+                'trim_start': self.trim_start_var.get(),
+                'trim_end': self.trim_end_var.get()
+            }
         self.lbl_in.config(text=f"{len(self.inputs)} file(s) selected")
         self.refresh_listbox()
-        if len(self.inputs) == 1:
-            self.recommend_settings(self.inputs[0])
 
     def select_output(self):
         d = filedialog.askdirectory(title="Select output")
@@ -428,6 +448,11 @@ class VideoCompressorApp(tk.Tk):
         for p in self.inputs:
             self.listbox.insert(tk.END, p.name)
 
+    def clear_list(self):
+        self.inputs = []
+        self.listbox.delete(0, tk.END)
+        self.lbl_in.config(text="No input selected")
+
     def open_output(self):
         if self.outdir:
             if sys.platform == "darwin":
@@ -441,3 +466,20 @@ class VideoCompressorApp(tk.Tk):
 if __name__ == "__main__":
     app = VideoCompressorApp()
     app.mainloop()
+    def on_file_select(self, event):
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        path = self.inputs[idx]
+        settings = self.file_settings.get(path)
+        if settings:
+            self.resolution_var.set(settings['resolution'])
+            self.codec_var.set(settings['codec'])
+            self.crf_var.set(settings['crf'])
+            self.preset_var.set(settings['preset'])
+            self.audio_bitrate_var.set(settings['audio_bitrate'])
+            self.video_bitrate_var.set(settings['video_bitrate'])
+            self.mono_var.set(settings['mono'])
+            self.trim_start_var.set(settings['trim_start'])
+            self.trim_end_var.set(settings['trim_end'])
